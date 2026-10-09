@@ -150,6 +150,7 @@ impl Api {
         // SAFETY: symbols use the public libmpv C ABI; all copied function pointers
         // are kept alive by _library. No user-provided libraries are loaded.
         unsafe {
+            // Windows ships mpv as libmpv-2.dll next to the executable or in PATH.
             #[cfg(unix)]
             let library = libloading::Library::new("libmpv.so.2").map_err(|_| ())?;
             #[cfg(windows)]

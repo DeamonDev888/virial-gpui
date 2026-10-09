@@ -410,6 +410,7 @@ fn transfer_with_progress(
                 #[cfg(unix)]
                 Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {}
                 #[cfg(windows)]
+                // Cross-device moves fall through to staged copy on Windows.
                 Err(error) if error.raw_os_error() == Some(17) => {}
                 Err(error) => return Err(error),
             }

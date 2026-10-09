@@ -96,10 +96,11 @@ pub(crate) fn search(
             return;
         }
         // Virtual kernel trees are not user files and can be unbounded.
-        if ["/proc", "/sys", "/dev"]
-            .iter()
-            .any(|root| directory.starts_with(root))
-        {
+        #[cfg(unix)]
+        let pseudo = ["/proc", "/sys", "/dev"];
+        #[cfg(windows)]
+        let pseudo = ["\\\\?\\"];
+        if pseudo.iter().any(|root| directory.starts_with(root)) {
             continue;
         }
         let metadata = match fs::metadata(&directory) {
