@@ -6,7 +6,7 @@ use crate::{
 use gpui::{AppContext, ClipboardItem, Context, Entity, KeyDownEvent, Pixels, Point, Window};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 
 #[derive(Clone)]
 pub struct Menu {
@@ -62,6 +62,9 @@ pub enum Dialog {
         entry: Entry,
         details: String,
     },
+    Clone {
+        input: Entity<NameInput>,
+    },
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -83,6 +86,9 @@ pub enum Action {
     Properties,
     AddWorkspace,
     NewWorkspace,
+    CloneRepository,
+    OpenOnGitHub,
+    CopyGithubLink,
 }
 impl Action {
     pub fn label(self) -> &'static str {
@@ -105,6 +111,9 @@ impl Action {
             Self::Properties => "Properties",
             Self::AddWorkspace => "Add to workspace…",
             Self::NewWorkspace => "New workspace…",
+            Self::CloneRepository => "Clone Repository…",
+            Self::OpenOnGitHub => "Open on GitHub",
+            Self::CopyGithubLink => "Copy GitHub permalink",
         }
     }
 }
@@ -265,6 +274,61 @@ impl FileManager {
                 }
             }
             Action::NewWorkspace => self.workspace_dialog(None, window, cx),
+            Action::CloneRepository => {
+                let input = cx.new(|cx| {
+                    let mut field =
+                        NameInput::new_unfocused(String::new(), cx);
+                    field.placeholder = self
+                        .language
+                        .text("https://github.com/owner/repository")
+                        .into();
+                    field
+                });
+                self.dialog = Some(Dialog::Clone { input });
+                cx.notify();
+            }
+            Action::OpenOnGitHub | Action::CopyGithubLink => {
+                let target = entry
+                    .as_ref()
+                    .map(|entry| entry.path.clone())
+                    .or_else(|| self.location.directory().map(|path| path.to_path_buf()));
+                let Some(target) = target else {
+                    return;
+                };
+                let language = self.language;
+                let task = cx.background_executor().spawn(async move {
+                    crate::infrastructure::git::repository(&target)
+                        .and_then(|repository| {
+                            crate::infrastructure::git::github_url(&repository, &target)
+                        })
+                        .ok_or_else(|| {
+                            language.text("This folder is not a GitHub repository").to_string()
+                        })
+                });
+                let is_copy = matches!(action, Action::CopyGithubLink);
+                cx.spawn(async move |view, cx| {
+                    let result = task.await;
+                    let _ = view.update(cx, |view, cx| {
+                        match result {
+                            Ok(url) if is_copy => {
+                                cx.write_to_clipboard(ClipboardItem::new_string(url.into()));
+                                view.error = None;
+                            }
+                            Ok(url) => {
+                                let opened = Command::new("xdg-open")
+                                    .arg(&url)
+                                    .output();
+                                if let Err(error) = opened {
+                                    view.error = Some(format!("{error}"));
+                                }
+                            }
+                            Err(message) => view.error = Some(message),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
             Action::Paste => {
                 if let (Some((sources, cut)), Some(directory)) = (self.clipboard.clone(), directory)
                 {
@@ -631,6 +695,36 @@ impl FileManager {
                 self.perform_undo(Some(entry), cx);
                 return;
             }
+            Some(Dialog::Clone { input }) => {
+                let url = input.read(cx).text.trim().to_owned();
+                let slug = crate::infrastructure::git::slug_from_url(&url);
+                if slug.is_none() {
+                    self.error = Some(
+                        self.language
+                            .text("Enter a GitHub repository URL")
+                            .into(),
+                    );
+                    cx.notify();
+                    return;
+                }
+                let name = slug.unwrap().split('/').next_back().unwrap_or("repository");
+                let directory = match self.location.directory() {
+                    Some(directory) => directory.to_path_buf(),
+                    None => {
+                        self.error = Some(
+                            self.language
+                                .text("Open a local folder to clone into")
+                                .into(),
+                        );
+                        cx.notify();
+                        return;
+                    }
+                };
+                let destination = directory.join(name);
+                self.close_dialog(window, cx);
+                self.clone_repository(url, destination, cx);
+                return;
+            }
             _ => None,
         };
         if let Some(operation) = operation {
@@ -640,6 +734,48 @@ impl FileManager {
     }
     pub(crate) fn run_operation(&mut self, operation: Operation, cx: &mut Context<Self>) {
         self.enqueue_operation(operation, cx);
+    }
+
+    /// Clone a GitHub repository into `destination` on the background thread,
+    /// then navigate to it — the tail of VS Code's "Git: Clone" flow.
+    fn clone_repository(
+        &mut self,
+        url: String,
+        destination: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self.busy {
+            return;
+        }
+        self.busy = true;
+        self.error = None;
+        let task = cx.background_executor().spawn(async move {
+            crate::infrastructure::git::clone(&url, &destination, |line| {
+                // Progress lines land in the log; the spinner is the UI.
+                let _ = line;
+            })
+        });
+        cx.spawn(async move |view, cx| {
+            let result = task.await;
+            let _ = view.update(cx, |view, cx| {
+                view.busy = false;
+                match result {
+                    Ok(()) => {
+                        view.error = None;
+                        view.navigate(destination, cx);
+                    }
+                    Err(error) => {
+                        view.error = Some(format!(
+                            "{}: {error}",
+                            view.language.text("Clone failed")
+                        ));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     pub(crate) fn request_empty_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {

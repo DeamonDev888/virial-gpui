@@ -4,6 +4,8 @@ use std::{fs::File, io};
 #[cfg(windows)]
 use std::fs;
 pub(crate) mod archive;
+pub(crate) mod git;
+pub(crate) mod git_url;
 pub(crate) mod image_edit;
 pub(crate) mod layout;
 pub(crate) mod media;

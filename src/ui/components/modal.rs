@@ -51,6 +51,7 @@ impl FileManager {
                 Dialog::EmptyTrash => "Empty Trash…",
                 Dialog::Undo { .. } => "Restore deleted items?",
                 Dialog::Properties { .. } => "Properties",
+                Dialog::Clone { .. } => "Clone Repository",
             };
             let mut content = div()
                 .id("dialog-panel")
@@ -144,6 +145,22 @@ impl FileManager {
                         .overflow_y_scroll()
                         .child(details.clone()),
                 ),
+                Dialog::Clone { input } => content
+                    .child(
+                        div().text_size(px(11.)).text_color(color(MUTED)).child(
+                            self.language
+                                .text("The repository is cloned into the open folder, then Virial navigates to it"),
+                        ),
+                    )
+                    .child(input.clone())
+                    .child(
+                        div().text_size(px(11.)).text_color(color(MUTED)).child(
+                            self.location
+                                .directory()
+                                .map(|path| path.display().to_string())
+                                .unwrap_or_default(),
+                        ),
+                    ),
                 Dialog::Applications {
                     entry,
                     applications,
@@ -197,6 +214,7 @@ impl FileManager {
                     | Dialog::EmptyTrash
                     | Dialog::ImageExport { .. }
                     | Dialog::Undo { .. }
+                    | Dialog::Clone { .. }
             );
             content = content.child(
                 div()
@@ -253,6 +271,26 @@ impl FileManager {
                     && self.location.directory().is_some_and(|path| {
                         crate::infrastructure::archive::split(path).is_none()
                     })));
+        // GitHub actions appear exactly when the target lives inside a
+        // repository with a GitHub origin; the check is a cheap git call the
+        // menu only pays when it is actually opened.
+        let github_target = if remote || trash {
+            None
+        } else {
+            entry
+                .as_ref()
+                .map(|entry| entry.path.clone())
+                .or_else(|| {
+                    self.location
+                        .directory()
+                        .map(|path| path.to_path_buf())
+                })
+        };
+        let github_slug = github_target
+            .as_ref()
+            .and_then(|path| crate::infrastructure::git::repository(path))
+            .filter(|repository| repository.slug.split('/').count() == 2)
+            .map(|repository| repository.slug);
         if remote {
             if entry.is_some() {
                 groups.push(vec![Action::Open]);
@@ -298,6 +336,9 @@ impl FileManager {
             if single {
                 groups.push(vec![Action::Properties]);
             }
+            if github_slug.is_some() {
+                groups.push(vec![Action::OpenOnGitHub, Action::CopyGithubLink]);
+            }
         } else {
             if self.location.directory().is_some() {
                 groups.push(vec![Action::NewFolder, Action::NewFile]);
@@ -307,6 +348,12 @@ impl FileManager {
             }
             if workspace {
                 groups.push(vec![Action::AddWorkspace]);
+            }
+            if github_slug.is_some() {
+                groups.push(vec![Action::OpenOnGitHub]);
+            }
+            if !remote && !trash && self.location.directory().is_some() {
+                groups.push(vec![Action::CloneRepository]);
             }
             if self.location == crate::domain::location::Location::Workspaces {
                 groups.push(vec![Action::NewWorkspace]);

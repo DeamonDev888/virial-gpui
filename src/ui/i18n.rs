@@ -184,6 +184,20 @@ impl Language {
             "New folder" => "Nouveau dossier",
             "New file" => "Nouveau fichier",
             "Copy path" => "Copier le chemin",
+            "Clone Repository…" => "Cloner un dépôt…",
+            "Clone Repository" => "Cloner un dépôt",
+            "Open on GitHub" => "Ouvrir sur GitHub",
+            "Copy GitHub permalink" => "Copier le lien GitHub permanent",
+            "https://github.com/owner/repository" => "https://github.com/proprio/depot",
+            "The repository is cloned into the open folder, then Virial navigates to it" => {
+                "Le dépôt est cloné dans le dossier ouvert, puis Virial s’y rend"
+            }
+            "Enter a GitHub repository URL" => "Saisissez l’URL d’un dépôt GitHub",
+            "Open a local folder to clone into" => "Ouvrez un dossier local pour cloner dedans",
+            "Clone failed" => "Échec du clonage",
+            "This folder is not a GitHub repository" => {
+                "Ce dossier n’appartient pas à un dépôt GitHub"
+            }
             "Properties" => "Propriétés",
             "Path" => "Chemin",
             "Size (bytes)" => "Taille (octets)",
